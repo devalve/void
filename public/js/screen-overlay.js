@@ -430,6 +430,84 @@ function stopScreenControlsIdle() {
 
 function setPointerOnScreenControls(on) { _pointerOnScreenControls = on; }
 
+/* ===== Технические детали демки (кнопка на оверлее просмотра) =====
+   В отличие от dev-only peer-HUD (webrtc.js toggleDebugHud) — доступно ВСЕМ
+   участникам, показывает статистику только того потока, который сейчас
+   открыт в оверлее (screenOverlayUserId). Кнопка входит в общую auto-hide
+   группу .controls-active (css/screencast.css) — прячется вместе с
+   остальными при простое; ПАНЕЛЬ — нет, остаётся открытой, пока юзер её
+   явно не закроет, независимо от простоя мыши. */
+let _statsTimer = null;
+const STATS_POLL_MS = 1000;
+
+function _formatScreenStatBitrate(kbps) {
+    if (kbps == null) return "—";
+    if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbps`;
+    return `${kbps} kbps`;
+}
+
+async function _refreshScreenStatsPanel() {
+    const panel = document.getElementById("screenOverlayStatsPanel");
+    if (!panel || panel.hidden || !screenOverlayUserId) return;
+    const stats = await getScreenStatsForViewer(screenOverlayUserId);
+    const resEl = document.getElementById("statResolution");
+    const brEl = document.getElementById("statBitrate");
+    const codecEl = document.getElementById("statCodec");
+    const connEl = document.getElementById("statConnection");
+    const rttEl = document.getElementById("statRtt");
+    if (!stats) {
+        if (resEl) resEl.textContent = "—";
+        if (brEl) brEl.textContent = "—";
+        if (codecEl) codecEl.textContent = "—";
+        if (connEl) connEl.textContent = "—";
+        if (rttEl) rttEl.textContent = "—";
+        return;
+    }
+    if (resEl) {
+        resEl.textContent = (stats.width && stats.height)
+            ? `${stats.width}×${stats.height}${stats.fps != null ? ` @${stats.fps}` : ""}`
+            : "—";
+    }
+    if (brEl) brEl.textContent = _formatScreenStatBitrate(stats.kbps);
+    if (codecEl) codecEl.textContent = stats.codec ? stats.codec.toUpperCase() : "—";
+    if (connEl) {
+        connEl.textContent = _t(stats.connection === "relay"
+            ? "screencast.stats.connection.relay"
+            : "screencast.stats.connection.direct");
+    }
+    if (rttEl) rttEl.textContent = stats.rtt != null ? `${stats.rtt} ms` : "—";
+}
+
+function toggleScreenStats() {
+    const panel = document.getElementById("screenOverlayStatsPanel");
+    const btn = document.getElementById("screenOverlayStatsBtn");
+    if (!panel) return;
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    btn?.classList.toggle("is-active", opening);
+    clearInterval(_statsTimer);
+    _statsTimer = null;
+    if (opening) {
+        _refreshScreenStatsPanel();
+        _statsTimer = setInterval(_refreshScreenStatsPanel, STATS_POLL_MS);
+    } else if (screenOverlayUserId) {
+        clearScreenStatsCache(screenOverlayUserId);
+    }
+}
+
+/* Зовётся из closeScreenOverlay — панель не должна пережить закрытие оверлея
+   (иначе при следующем открытии другого юзера она осталась бы открытой со
+   старыми/чужими цифрами до первого тика интервала). */
+function _closeScreenStatsPanel() {
+    const panel = document.getElementById("screenOverlayStatsPanel");
+    const btn = document.getElementById("screenOverlayStatsBtn");
+    if (panel) panel.hidden = true;
+    btn?.classList.remove("is-active");
+    clearInterval(_statsTimer);
+    _statsTimer = null;
+    if (screenOverlayUserId) clearScreenStatsCache(screenOverlayUserId);
+}
+
 function openScreenOverlay(userId) {
     const videoEl = videoMap.get(userId);
     if (!videoEl?.srcObject) {
@@ -511,6 +589,7 @@ function _setDesktopScreenFs(on) {
 
 function closeScreenOverlay(opts) {
     if (!screenOverlay) return;
+    _closeScreenStatsPanel();
     if (_screenNativeFs) {
         _setDesktopScreenFs(false); // desktop: выйти из нативного fullscreen окна
     } else if (document.fullscreenElement === screenOverlay) {

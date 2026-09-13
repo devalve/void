@@ -12,20 +12,33 @@ on:
   push:
     branches:
       - main
+      # feature/screencast-bitrate-stats — временная ветка для сборки desktop-
+      # релиза (кастомный битрейт демки + технические детали) БЕЗ выкатки на
+      # прод. Держит собственный concurrency-lane (см. ниже) и deploy-джоба
+      # на ней не выполняется (см. `if:` у job `deploy`) — можно спокойно
+      # удалить строку после мержа в main, ничего не сломается.
+      - feature/screencast-bitrate-stats
   # Кнопка «Run workflow» в UI на случай ручного передеплоя без коммита.
   workflow_dispatch:
 
-# Запрещаем параллельные деплои: если пуш прилетел во время прошлого деплоя,
-# новый встаёт в очередь и отменяет предыдущий — на сервере не должно быть
-# двух конкурентных `docker compose up --build` подряд.
+# Запрещаем параллельные ДЕПЛОИ друг с другом (два concurrent `docker compose
+# up --build` на VPS). Лейн привязан к ref: раньше был общий на все пуши —
+# пуш в фиче-ветку встал бы в очередь с деплоем main и мог отменить
+# ("cancel-in-progress") реальный прод-деплой, который в этот момент едет.
+# Так у main и у любой другой ветки/dispatch — свой независимый лейн.
 concurrency:
-  group: deploy-vps
+  group: deploy-vps-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # ТОЛЬКО main реально деплоится на VPS. Без этого гейта пуш в любую другую
+    # ветку (см. feature/screencast-bitrate-stats выше) или workflow_dispatch
+    # с неё же зашёл бы на прод-сервер SSH'ем и дёрнул docker-compose/Caddy —
+    # ровно то, чего просили избежать при сборке desktop-релиза с фиче-ветки.
+    if: github.ref == 'refs/heads/main'
 
     steps:
       - name: Setup SSH
@@ -287,7 +300,12 @@ jobs:
     runs-on: windows-latest
     # Гейт: сначала компиляционный сторож, потом полуторачасовая сборка.
     # Иначе ошибка Rust жгла бы 40+ минут раннера, чтобы упасть на том же.
-    needs: [deploy, check-desktop]
+    # deploy НЕ в needs (было: [deploy, check-desktop]) — desktop-сборка не
+    # зависит от VPS-деплоя, а на фиче-ветках `deploy` вообще skip'нута (см.
+    # `if:` в её job) — GitHub Actions по умолчанию считает зависимую job
+    # тоже skipped, если needed job skipped, так что build-desktop просто не
+    # запустился бы вообще, будь тут прежняя связка.
+    needs: [check-desktop]
     # Холодная сборка ТРЁХ независимых Tauri-крейтов (uninstaller → app →
     # installer), каждый в своём target/ — на Windows-раннере это ~60-90 мин с
     # нуля. 30 мин не хватало: джоба убивалась таймаутом, не успев сохранить
