@@ -87,11 +87,21 @@ jobs:
              git reset --hard origin/main
              AFTER=$(git rev-parse HEAD)
 
+             # Сначала валидируем УСТАНОВЛЕННЫМ бинарником. Caddyfile требует
+             # модуль layer4 (TURN по TLS на 443), которого нет в apt-сборке:
+             # без проверки мы бы положили в /etc/caddy файл, на котором reload
+             # упадёт, а следующий рестарт Caddy не поднимет сайт вовсе. Невалидный
+             # файл НЕ синкаем, деплой продолжается — сайт живёт на прежнем конфиге.
              if ! cmp -s ~/void/Caddyfile /etc/caddy/Caddyfile 2>/dev/null; then
-               echo "Caddyfile changed, syncing..."
-               sudo cp ~/void/Caddyfile /etc/caddy/Caddyfile
-               sudo systemctl reload caddy
-               echo "Caddy reloaded"
+               if sudo caddy validate --adapter caddyfile --config ~/void/Caddyfile >/tmp/caddy-validate.log 2>&1; then
+                 echo "Caddyfile changed, syncing..."
+                 sudo cp ~/void/Caddyfile /etc/caddy/Caddyfile
+                 sudo systemctl reload caddy
+                 echo "Caddy reloaded"
+               else
+                 echo "::warning::Caddyfile NOT synced: installed caddy rejects it (layer4 build missing?)"
+                 tail -n 3 /tmp/caddy-validate.log
+               fi
              else
                echo "Caddyfile unchanged"
              fi

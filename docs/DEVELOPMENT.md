@@ -307,6 +307,67 @@ TTL ~1ч. coturn валидирует тем же `--static-auth-secret`. Баз
 
 ---
 
+## TURN по TLS на 443 (VPN / прокси «только 443»)
+
+> Пошаговая версия «что и куда вводить» — `docs/turn-tls-setup.md`.
+
+Зачем: у части пользователей до coturn не доходит ни UDP, ни TCP 3478 — VPN-
+провайдеры с фильтром портов, прокси, пропускающие только 443. Для них клиент
+получает 4-й адрес `turns:turn.void-room.space:443?transport=tcp`. Стенд с
+замерами — `tasks/todo.md`.
+
+Как устроено: на VDS один публичный IP, 443 занят сайтом. Caddy (сборка с
+модулем **layer4**) смотрит SNI входящего TLS: `turn.void-room.space` — сам
+снимает TLS своим сертификатом и отдаёт голый TCP в coturn `:3478`; всё прочее
+проваливается в обычный HTTPS. coturn не меняется, сертификаты ему не нужны.
+
+**Порядок важен.** Caddyfile в репо уже требует layer4. Деплой проверяет его
+`caddy validate` и, пока на сервере штатная apt-сборка, файл НЕ подкладывает
+(в логе деплоя warning) — сайт живёт на прежнем конфиге.
+
+1. **DNS:** A-запись `turn.void-room.space` → IP VPS. Дождаться резолва.
+2. **Сборка Caddy с layer4** (официальный способ для deb-пакета, apt дальше
+   обновляет только штатный бинарник):
+
+   ```bash
+   dpkg --print-architecture                     # amd64 / arm64 — подставить ниже
+   curl -fsSL -o /tmp/caddy "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com%2Fmholt%2Fcaddy-l4"
+   chmod +x /tmp/caddy
+   /tmp/caddy list-modules | grep caddy.listeners.layer4        # модуль на месте
+   sudo /tmp/caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile  # текущий конфиг жив
+
+   sudo dpkg-divert --divert /usr/bin/caddy.default --rename /usr/bin/caddy
+   sudo mv /tmp/caddy /usr/bin/caddy.custom
+   sudo update-alternatives --install /usr/bin/caddy caddy /usr/bin/caddy.default 10
+   sudo update-alternatives --install /usr/bin/caddy caddy /usr/bin/caddy.custom 50
+   sudo systemctl restart caddy                  # пара секунд без HTTPS, WS переподключатся
+   ```
+
+3. **Деплой** (Actions → Run workflow): теперь Caddyfile валиден → синк →
+   reload → Caddy берёт сертификат для `turn.void-room.space` (HTTP-01 на :80).
+   Проверка со своей машины:
+
+   ```bash
+   curl -sI https://void-room.space | head -1                  # сайт жив
+   openssl s_client -connect turn.void-room.space:443 -servername turn.void-room.space </dev/null 2>/dev/null \
+     | openssl x509 -noout -subject -issuer                    # серт LE на turn.*
+   ```
+
+4. **Включить раздачу адреса:** в `.env` на VPS `TURN_TLS_HOST=turn.void-room.space`,
+   затем `docker compose --profile turn up -d void` (пересоздаёт контейнер =
+   рестарт сигналинга, всех выкинет из комнат — делать в тихое время).
+5. **Контроль:** в /adminstats под relay строка «↳ via … tls N».
+
+Откат: вернуть прежний Caddyfile в `/etc/caddy/` (штатная сборка новый не
+запустит!), затем `sudo update-alternatives --set caddy /usr/bin/caddy.default`
+и `sudo systemctl restart caddy`; `TURN_TLS_HOST` очистить.
+
+Обновление кастомной сборки: `sudo caddy upgrade` (тянет тот же набор модулей).
+
+Ёмкость: TLS — третий allocation на peer. Полная комната на 10 человек — до 270
+relay-портов из 1000; при росте одновременных полных комнат расширять диапазон
+(coturn/turnserver.conf + firewall) и `total-quota`.
+
 ## деплой (desktop)
 
 - `npm run tauri:build` → NSIS (`void_setup.exe`) + portable (через `rename-bundles.mjs`).

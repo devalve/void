@@ -55,9 +55,13 @@ function updateSelfVisualState() {
 
 function applyAudioState() {
 
-    if (localStream) {
+    /* Мьют — нулём на выходе аудио-графа, сам микрофон не трогаем (почему —
+       см. setMicSendMuted в webrtc.js). Без графа — по-старому, через трек. */
+    const micLive = isMicOn && isSoundOn;
+    const viaGraph = typeof setMicSendMuted === "function" && setMicSendMuted(!micLive);
+    if (!viaGraph && localStream) {
         localStream.getAudioTracks().forEach(track => {
-            track.enabled = isMicOn && isSoundOn;
+            track.enabled = micLive;
         });
     }
 

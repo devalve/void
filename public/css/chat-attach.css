@@ -290,6 +290,11 @@
     letter-spacing: var(--tracking);
     outline: none;
     transition: border-color var(--t-fast), background var(--t-fast);
+    /* Текст в textarea переносится — горизонтального скролла быть не должно
+       никогда; auto ловил субпиксельный остаток ширины и рисовал системную
+       полосу под пустым полем. Вертикальный включает autoResizeInput()
+       инлайном, только когда поле упёрлось в max-height. */
+    overflow-x: hidden;
     overflow-y: auto;
 }
 

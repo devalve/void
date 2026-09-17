@@ -39,7 +39,7 @@
     <link rel="stylesheet" href="css/volume-arc.css?v=18">
     <link rel="stylesheet" href="css/ping.css?v=18">
     <link rel="stylesheet" href="css/chat.css?v=26">
-    <link rel="stylesheet" href="css/chat-attach.css?v=20">
+    <link rel="stylesheet" href="css/chat-attach.css?v=21">
     <link rel="stylesheet" href="css/chat-overlay.css?v=20">
     <link rel="stylesheet" href="css/screencast.css?v=34">
     <link rel="stylesheet" href="css/responsive.css?v=23">
@@ -53,9 +53,6 @@
     <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="Void" />
-    <!-- iOS PWA: при добавлении на home screen открывать в standalone-режиме
-         (без Safari chrome) и держать тёмный translucent status bar — иначе
-         поверх ambient-фона нарисуется белая полоса. v0.9.21 (M5.4). -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -63,10 +60,6 @@
 </head>
 
 <body>
-    <!-- Custom titlebar — рендерится только в desktop-сборке
-         (html.desktop класс ставится desktop-bootstrap.js).
-         В web-сборке скрыт через display:none в titlebar.css.
-         Layout — Windows-order: drag-region слева, кнопки min/max/close справа. -->
     <header class="void-titlebar" id="voidTitlebar" data-tauri-drag-region>
         <div class="void-titlebar-drag" data-tauri-drag-region></div>
         <div class="void-titlebar-controls">
@@ -83,17 +76,12 @@
         </div>
     </header>
 
-    <!-- background-gl: блобовые темы (silence/nebula) рисуются шейдером —
-         только там можно подмешать дизер ДО округления до 8 бит и убрать
-         террасы на градиенте. Идёт ПЕРВЫМ: 2D-холст выше по стопке, но на этих
-         темах пустой, а на grid/mesh gl-холст скрыт. Нет WebGL — остаётся
-         прежний 2D-путь. -->
     <canvas id="background-gl" style="display:none"></canvas>
     <canvas id="background"></canvas>
     <canvas id="background-stars"></canvas>
     <div id="background-grain"></div>
 
-    <!-- ambient/welcome — интро-звуки; событийные звуки синтезируются (js/void-sfx.js) -->
+    <!-- ambient/welcome -->
     <audio id="ambientSound" src="static/ambient.mp3"></audio>
     <audio id="welcomeSound" src="static/welcome.mp3"></audio>
 
@@ -160,8 +148,6 @@
 
         <main class="stage">
             <div class="stage-stack">
-
-                <!-- ТОЧКА A: пользователи. Ripple и аватар центрируются в одну точку. -->
                 <div class="users-area" id="room">
                     <div class="users-slot">
                         <div class="lobby-ripple" aria-hidden="true">
@@ -173,14 +159,8 @@
                     </div>
                 </div>
 
-                <!-- ТОЧКА B: панель. Фикс высоты, top:0 у обоих слоёв — input и controls на одной точке. -->
                 <div class="panel-area">
                     <div class="panel-input">
-                        <!-- Entry-флоу ошибки (mic-blocked, room-not-found, code-taken,
-                             connection-failed/lost, rate-limited и т.п.) живут ВНУТРИ
-                             panel-input, над полем кода — это контекстная ошибка про
-                             действие «войти», она должна быть рядом с инпутом, а не в
-                             общем toast-host над футером (v0.9.17). -->
                         <div class="entry-error-toast" id="entryError" role="status" aria-live="polite"
                             aria-hidden="true">
                             <span class="entry-error-glyph" aria-hidden="true">×</span>
@@ -354,8 +334,6 @@
         </footer>
     </div>
 
-    <!-- Микрофон заблокирован: sticky-диалог с инструкцией. Закрывается
-         кнопкой / Esc / кликом по backdrop. См. U1 в tasks/audit.md. -->
     <div class="mic-blocked-modal" id="micBlockedModal" aria-hidden="true" inert role="dialog"
         aria-labelledby="micBlockedTitle">
         <div class="mic-blocked-backdrop" id="micBlockedBackdrop"></div>
@@ -420,9 +398,7 @@
                     <span class="sc-switch-track"></span>
                 </label>
             </div>
-            <!-- Только macOS: браузеры там отдают звук лишь при захвате вкладки,
-                 при выборе экрана или окна его нет. Разблокируется в js/app.js
-                 по VoidIsMac; на Windows остаётся hidden. -->
+
             <p class="sc-note" id="scAudioNote" data-i18n="screencast.audio.macos" hidden>
                 on macos, audio only comes through when you share a browser tab
             </p>
@@ -476,13 +452,11 @@
     </div>
 
     <script defer src="log.js?v=1"></script>
-    <script defer src="settings.js?v=109"></script>
-    <!-- Заметки к текущему релизу (контент, правится на выкатке).
-         Потребитель — js/desktop/whats-new.js. -->
-    <script defer src="whats-new.js?v=7"></script>
-    <script defer src="webrtc.js?v=26"></script>
+    <script defer src="settings.js?v=110"></script>
+    <script defer src="whats-new.js?v=8"></script>
+    <script defer src="webrtc.js?v=27"></script>
     <script defer src="socket.js?v=3"></script>
-    <script defer src="chat.js?v=9"></script>
+    <script defer src="chat.js?v=10"></script>
     <script defer src="js/config.js?v=7"></script>
     <script defer src="js/state.js?v=11"></script>
     <script defer src="js/dev-mode.js?v=1"></script>
@@ -492,9 +466,9 @@
     <script defer src="js/void-sfx-pad.js?v=1"></script>
     <script defer src="js/audio.js?v=6"></script>
     <script defer src="js/username.js?v=1"></script>
-    <script defer src="js/controls.js?v=3"></script>
-    <script defer src="js/participants.js?v=7"></script>
-    <script defer src="js/volume-arc.js?v=2"></script>
+    <script defer src="js/controls.js?v=4"></script>
+    <script defer src="js/participants.js?v=8"></script>
+    <script defer src="js/volume-arc.js?v=3"></script>
     <script defer src="js/ping-panel.js?v=2"></script>
     <script defer src="js/screen-overlay.js?v=9"></script>
     <script defer src="js/intro.js?v=3"></script>
@@ -510,5 +484,4 @@
     <script defer src="js/desktop/updater.js?v=6"></script>
     <script defer src="js/desktop/whats-new.js?v=1"></script>
 </body>
-
 </html>

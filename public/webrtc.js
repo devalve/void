@@ -49,11 +49,12 @@ const screenSenders = new Map();
 const peerHealthTimers = new Map();
 
 /**
- * T1.2: zombie peer watchdog. Когда peer в `connected`, ожидаем непрерывный
- * поток audio-пакетов (Chromium шлёт comfort-noise RTP даже при mute, т.е.
- * `track.enabled = false` не обнуляет packetsReceived). Если счётчик не растёт
- * 5+ сек — peer truly dead (kill -9 / BSOD / выдернули LAN ДО pagehide).
- * Не дожидаемся ICE-таймаута (до 13+ сек), сразу rebuildPeer.
+ * T1.2: zombie peer watchdog. Когда peer в `connected`, ждём, что растёт хотя бы
+ * один из двух счётчиков: audio-пакеты ИЛИ трафик candidate-pair. Если 5+ сек
+ * не растёт НИ ОДИН — peer truly dead (kill -9 / BSOD / выдернули LAN ДО
+ * pagehide), не дожидаемся ICE-таймаута (до 13+ сек), сразу rebuildPeer.
+ * Одних audio-пакетов мало: они замирают и у живого peer'а (свёрнутая вкладка,
+ * interrupted AudioContext на iOS), и пересборка по ним рвала здоровые связи.
  *
  * peerZombieWatchers: userId → { timer, lastCount, lastGrowthAt, startedAt }
  * peerZombieRebuilds: userId → { count, firstAt } — circuit breaker, чтобы
@@ -541,15 +542,52 @@ async function applyAudioProcessing(rawStream) {
     lowpass.connect(compressor);
     compressor.connect(analyser);
     analyser.connect(gateGain);
+    /* Мьют живёт здесь, последней нодой перед отправкой (см. setMicSendMuted).
+       Отдельно от `gain`: тот принадлежит ползунку «усиление» в настройках. */
+    const muteGain = ctx.createGain();
+    muteGain.gain.value = (isMicOn && isSoundOn) ? 1 : 0;
+
     gateGain.connect(gain);
-    gain.connect(destination);
+    gain.connect(muteGain);
+    muteGain.connect(destination);
 
     // Сохраняем ссылки для teardownAudioGraph(). gateState хранит флаг
     // running — устанавливается в false при teardown, чтобы rAF-loop
     // вышел сам, не плодя зомби-циклы.
-    audioGraph = { source, rnnoise, highpass, lowpass, compressor, analyser, gateGain, gain, destination, gateState };
+    audioGraph = { source, rnnoise, highpass, lowpass, compressor, analyser, gateGain, gain, muteGain, destination, gateState };
 
     return destination.stream;
+}
+
+/**
+ * Выключение микрофона для собеседников. Возвращает false, если графа нет
+ * (Web Audio недоступен) — тогда вызывающий глушит сам трек, как раньше.
+ *
+ * Раньше мьют был `track.enabled = false` на СЫРОМ микрофоне — источнике всего
+ * графа. Это меняло состояние захвата на лету: граф получал цифровой ноль,
+ * Firefox/Safari через пару секунд отпускают устройство (Bluetooth-гарнитура
+ * при этом переключает профиль), и ровно на время мьюта у человека хрипели
+ * голоса собеседников, пропадая в момент включения. Теперь захват, шумодав,
+ * gate и анализатор в мьюте работают так же, как без него, — меняется только
+ * множитель на выходе. Короткий рамп — чтобы обрыв фразы не щёлкал.
+ */
+const MIC_MUTE_RAMP_S = 0.015;
+
+function setMicSendMuted(muted) {
+    if (!audioGraph || !audioGraph.muteGain || !audioContext) return false;
+    localStream?.getAudioTracks().forEach(t => { t.enabled = true; });
+    const g = audioGraph.muteGain.gain;
+    const target = muted ? 0 : 1;
+    const t = audioContext.currentTime;
+    g.cancelScheduledValues(t);
+    if (audioContext.state === "running") {
+        g.setValueAtTime(g.value, t);
+        g.linearRampToValueAtTime(target, t + MIC_MUTE_RAMP_S);
+    } else {
+        /* Контекст стоит — время не идёт, рамп не доедет до конца. */
+        g.value = target;
+    }
+    return true;
 }
 
 /**
@@ -710,6 +748,7 @@ document.addEventListener("visibilitychange", () => {
                 track: t.readyState,
                 muted: t.muted,
                 enabled: t.enabled,
+                sendMuted: audioGraph?.muteGain ? audioGraph.muteGain.gain.value === 0 : null,
                 ctx: audioContext?.state || "none",
                 processed: processedStream?.active ?? null
             });
@@ -1534,14 +1573,13 @@ function clearPeerHealthTimer(userId) {
  * T1.2: запустить zombie watchdog. Старт при переходе peer'а в `connected`.
  * Полный idempotent: повторный вызов сначала стопает предыдущий.
  *
- * Каждые ZOMBIE_CHECK_INTERVAL_MS снимаем `getStats()`, суммируем
- * `inbound-rtp.packetsReceived` по audio-секциям (mic — единственная
- * audio-секция в обычной сессии; screen-audio тоже учитывается, что ок —
- * любой растущий счётчик доказывает живость канала).
+ * Каждые ZOMBIE_CHECK_INTERVAL_MS снимаем `getStats()` и смотрим ДВА счётчика:
+ * `inbound-rtp.packetsReceived` по audio-секциям и `candidate-pair.bytesReceived`
+ * по рабочим парам (транспорт: ICE consent-checks + RTCP).
  *
- * Если в течение ZOMBIE_THRESHOLD_MS после WARMUP'а счётчик не вырос —
- * считаем peer мёртвым и зовём rebuildPeer. Circuit breaker не даёт уйти
- * в бесконечный rebuild-loop при структурном баге.
+ * Мёртвый peer — это когда встали ОБА. Если аудио стоит, а транспорт тикает,
+ * peer жив и просто молчит — rebuild такому только рвёт связь (см. длинный
+ * комментарий в теле). Circuit breaker не даёт уйти в бесконечный rebuild-loop.
  */
 function startZombieWatcher(userId) {
     stopZombieWatcher(userId);
@@ -1550,8 +1588,10 @@ function startZombieWatcher(userId) {
 
     const state = {
         lastCount: -1,
+        lastLink: -1,
         lastGrowthAt: Date.now(),
         startedAt: Date.now(),
+        silentLogged: false,
         timer: null
     };
 
@@ -1563,11 +1603,18 @@ function startZombieWatcher(userId) {
         }
 
         let total = 0;
+        let link = 0;
         try {
             const stats = await p.getStats();
             stats.forEach(r => {
                 if (r.type === "inbound-rtp" && r.kind === "audio") {
                     total += r.packetsReceived || 0;
+                }
+                /* Транспортный слой: ICE consent-checks и RTCP тикают, пока
+                   на том конце есть живой браузер, даже если аудио оттуда не
+                   идёт вообще. Это и отличает «молчит» от «умер». */
+                if (r.type === "candidate-pair" && (r.selected || r.state === "succeeded")) {
+                    link += r.bytesReceived || 0;
                 }
             });
         } catch (_) {
@@ -1583,13 +1630,37 @@ function startZombieWatcher(userId) {
            поток ещё не приехал). */
         if (now - state.startedAt < ZOMBIE_WARMUP_MS) {
             state.lastCount = total;
+            state.lastLink = link;
             state.lastGrowthAt = now;
             return;
         }
 
-        if (total > state.lastCount) {
-            state.lastCount = total;
+        const audioGrew = total > state.lastCount;
+        const linkGrew = link > state.lastLink;
+        state.lastCount = total;
+        state.lastLink = link;
+
+        if (audioGrew) {
             state.lastGrowthAt = now;
+            state.silentLogged = false;
+            return;
+        }
+
+        /* Аудио встало, но транспорт живой → peer на месте, просто не отдаёт
+           звук. Так выглядит свёрнутая вкладка, interrupted AudioContext на
+           iOS и mute в браузерах, которые глушат поток на источнике. Замер:
+           у такого peer'а inbound-rtp стоит намертво, а candidate-pair
+           прибавляет ~1.7 KB за 3 с. Пересборка тут не чинит НИЧЕГО (трек на
+           той стороне всё равно молчит), зато рвёт живое соединение: до этой
+           проверки такой peer получал rebuild каждые ~5 с, а в комнате на 8
+           человек это лавина пересборок и новых TURN-allocation'ов — в
+           failure-логе она видна как 486 Allocation Quota Reached. */
+        if (linkGrew) {
+            state.lastGrowthAt = now;
+            if (!state.silentLogged) {
+                state.silentLogged = true;
+                log.info("rtc", "peer silent, link alive - no rebuild", { userId });
+            }
             return;
         }
 
@@ -2862,7 +2933,13 @@ async function classifyConnection(peer) {
         if (!local && !remote) return null;
 
         const isRelay = c => c && c.candidateType === "relay";
-        return (isRelay(local) || isRelay(remote)) ? "relay" : "direct";
+        if (!isRelay(local) && !isRelay(remote)) return { result: "direct", via: null };
+        /* Чем МЫ дошли до TURN: udp / tcp / tls. Известно только стороне, у
+           которой relay-кандидат свой (relayProtocol); если relay только у пира —
+           его путь он отчитает сам. Нужно, чтобы видеть, сколько людей держится
+           на TCP/TLS-запасных путях (VPN без UDP, прокси только-443). */
+        const via = isRelay(local) ? (local.relayProtocol || null) : null;
+        return { result: "relay", via };
     } catch {
         return null;
     }
@@ -2976,14 +3053,14 @@ async function reportConnectivity(peer) {
        Раньше на этом молча теряли отчёт — соединение не попадало ни в direct,
        ни в relay, а его последующий обрыв засчитывался как провал установки.
        Даём второй шанс через секунду, прежде чем сдаться. */
-    let result = await classifyConnection(peer);
-    if (!result) {
+    let cls = await classifyConnection(peer);
+    if (!cls) {
         await new Promise(r => setTimeout(r, 1000));
         if (peer._iceReported) return;
         if (peer.connectionState !== "connected") return;
-        result = await classifyConnection(peer);
+        cls = await classifyConnection(peer);
     }
-    if (!result) {
+    if (!cls) {
         log.warn("rtc", "connected but candidate pair unavailable, not classified", {
             userId: peer._userId
         });
@@ -2991,7 +3068,8 @@ async function reportConnectivity(peer) {
     }
     if (peer._iceReported) return; // мог измениться, пока ждали getStats
     peer._iceReported = true;
-    sendSocket({ type: "ice-report", result });
+    const { result, via } = cls;
+    sendSocket(via ? { type: "ice-report", result, via } : { type: "ice-report", result });
 
     if (result === "relay") {
         peer._isRelay = true;
