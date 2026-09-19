@@ -136,6 +136,9 @@ function initChat() {
     });
     chatInputEl.addEventListener("input", autoResizeInput);
     chatInputEl.addEventListener("paste", handleChatPaste);
+    // Стартовая синхронизация: браузер может восстановить значение textarea
+    // после reload, а input-события при этом не будет.
+    autoResizeInput();
 
     chatFileInput.addEventListener("change", (e) => {
         for (const f of e.target.files) addPendingAttachment(f, autoKindForFile(f));
@@ -1776,8 +1779,17 @@ function autoResizeInput() {
     const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 14;
     const minH = 2.43 * rootPx;
     const maxH = 8.57 * rootPx;
-    const next = Math.min(chatInputEl.scrollHeight, maxH);
-    chatInputEl.style.height = Math.max(minH, next) + "px";
+    /* scrollHeight меряет padding-box, а box-sizing у нас border-box — в
+       style.height надо доложить рамки. Без них поле систематически на 2px
+       ниже собственного содержимого: даже пустой инпут «переполнен» на доли
+       пикселя и рисует вертикальный скролл. */
+    const cs = getComputedStyle(chatInputEl);
+    const borders = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    const full = chatInputEl.scrollHeight + borders;
+    chatInputEl.style.height = Math.max(minH, Math.min(full, maxH)) + "px";
+    /* Скролл включаем только когда реально упёрлись в максимум — иначе
+       субпиксельные остатки округления дают полосу на пустом поле. */
+    chatInputEl.style.overflowY = full > maxH ? "auto" : "hidden";
 }
 
 function showChatToast(text) {
@@ -1804,6 +1816,12 @@ function clearUnreadBadge() {
 /* ========= IMAGE DOWNSCALE ========= */
 
 async function downscaleImage(file, maxDim, quality) {
+    /* GIF отдаём как есть. Перекодировка через canvas забирает только первый
+       кадр — анимация умирает (в превью-миниатюре она живая, потому что там
+       показывается исходный файл, а не результат downscale). Размер уже
+       ограничен CHAT_MAX_IMAGE_MB на этапе прикрепления. */
+    if (/^image\/gif$/i.test(file.type)) return file;
+
     // Маленькие jpeg отдаём как есть — экономим CPU и не дрочим качество.
     if (file.size < 350 * 1024 && /^image\/jpe?g$/i.test(file.type)) {
         return file;

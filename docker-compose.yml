@@ -40,6 +40,10 @@ services:
       # режим). Эти же значения используются coturn (как static-auth-secret).
       - TURN_HOST=${TURN_HOST:-}
       - TURN_SECRET=${TURN_SECRET:-}
+      # TLS-вход coturn (turns://) для сетей, где пускают только 443. Hostname
+      # с настоящим сертификатом (IP браузер не примет). Пусто — не раздаём.
+      - TURN_TLS_HOST=${TURN_TLS_HOST:-}
+      - TURN_TLS_PORT=${TURN_TLS_PORT:-443}
     volumes:
       # Персистентная статистика beta-теста: stats.json лежит на хосте
       # и переживает docker compose up --build / restart. Папка ./data

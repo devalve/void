@@ -39,9 +39,21 @@
    Посмотреть, как это выглядит, ДО выкатки: `VoidWhatsNewPreview()` в консоли. */
 
 window.VoidWhatsNew = {
-    /* 1.4.2 — правки только в админ-панели, пользователю показывать нечего.
-       Пустые списки = баннера нет (штатный режим, см. правила выше). */
-    version: "",
-    ru: [],
-    en: []
+    version: "1.5.0",
+    ru: [
+        "гифки в чате теперь воспроизводятся",
+        "голоса собеседников больше не хрипят, когда у выключается микрофон",
+        "стабильнее связь в больших комнатах",
+        "— свёрнутое окно или заблокированный телефон у кого-то из участников больше не рвут соединение",
+        "участники ровнее располагаются на экране, особенно на телефоне",
+        "из поля ввода в чате пропали лишние полосы прокрутки"
+    ],
+    en: [
+        "chat gifs are now playing",
+        "other people's voices no longer crackle while your mic is off",
+        "steadier connection in big rooms",
+        "— a minimized window or a locked phone no longer drops anyone's connection",
+        "participants are laid out more evenly, especially on phones",
+        "no more stray scrollbars in the chat input"
+    ]
 };

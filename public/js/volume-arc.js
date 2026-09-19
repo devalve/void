@@ -214,5 +214,8 @@ window.onVolumeChange = function(userId, volume) {
         document.querySelector(`.participant[data-user-id="${userId}"]`);
     if (!participant) return;
 
-    participant.classList.toggle("speaking", volume > 18);
+    /* Свой анализатор слушает сырой микрофон, а он в мьюте теперь живой —
+       подсветку «говорит» гасим сами, иначе блоб мигал бы при выключенном микро. */
+    const silenced = userId === clientId && !(isMicOn && isSoundOn);
+    participant.classList.toggle("speaking", !silenced && volume > 18);
 };

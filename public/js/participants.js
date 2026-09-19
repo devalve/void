@@ -305,6 +305,35 @@ function _nameHeight(sz, remPx) {
     return fs * 2.5 + 0.6 * remPx;
 }
 
+/* Полуширина ника (px). JetBrains Mono моноширинный: ~0.6em на символ плюс
+   letter-spacing 0.18em (--tracking-wide). Ник почти всегда ШИРЕ блоба, и если
+   клампить позиции по блобу (как было), длинный ник у края области вылезает
+   за экран — на телефоне это и выглядело как «сетка съехала вбок». */
+function _nameHalfWidth(el, sz, remPx) {
+    const fs = Math.min(0.86 * remPx, Math.max(0.62 * remPx, sz * 0.16));
+    let maxLen = 0;
+    el.querySelectorAll(".participant-name-line").forEach(l => {
+        maxLen = Math.max(maxLen, (l.textContent || "").trim().length);
+    });
+    return maxLen * fs * 0.78 / 2;
+}
+
+/* Вертикальное центрирование всей композиции (блобы + ники) в измеренной
+   области. Дуга растёт ВВЕРХ от self, а self прибит к центру .users-slot,
+   который сам сидит выше середины области — без сдвига корона жмётся к шапке
+   (замер: 17px сверху против 100px снизу), и fit-scale вдобавок ужимает блобы,
+   хотя снизу пустует место. Режим строк делает ровно это с самого начала. */
+function _centerVertically(pos, selfEl, sz, selfSz, nameH, selfNameH, region) {
+    let minTop = Infinity, maxBot = -Infinity;
+    for (const [el, p] of pos) {
+        const s = el === selfEl ? selfSz : sz, nh = el === selfEl ? selfNameH : nameH;
+        minTop = Math.min(minTop, p.y - s / 2);
+        maxBot = Math.max(maxBot, p.y + s / 2 + nh);
+    }
+    const shift = ((region.down - maxBot) - (minTop + region.up)) / 2;
+    for (const p of pos.values()) p.y += shift;
+}
+
 /* Замер доступной области в offset-координатах от якоря (центра .users-slot).
    up/down — сколько можно вверх/вниз, halfW — половина ширины. */
 function _measureRegion(remPx) {
@@ -392,13 +421,17 @@ function _computeRows(els, pos, sz, nameH, region) {
    области дуга может дать наложение ников). В просторной области наложений нет →
    ни одного сдвига (дуга остаётся чистой). self зафиксирован в центре (не двигаем).
    Финальная страховка — чисто по X (ширины почти всегда хватает). */
-function _relaxBoxes(pos, selfEl, sz, selfSz, nameH, region) {
+function _relaxBoxes(pos, selfEl, sz, selfSz, nameH, region, remPx) {
     const others = [...pos.keys()].filter(e => e !== selfEl);
     if (others.length < 2) return;
     const wReq = sz * 1.06, hReq = sz + nameH * 0.82;
     // keep-out от self считаем по среднему радиусу (self может быть крупнее на 8-10).
     const wReqS = (sz + selfSz) / 2 * 1.06, hReqS = (sz + selfSz) / 2 + nameH * 0.82;
-    const hx = region.halfW - sz / 2;
+    /* Боковой предел — свой у каждого: у длинного ника он строже, чем у блоба. */
+    const hxOf = new Map();
+    for (const e of others) {
+        hxOf.set(e, Math.max(sz * 0.2, region.halfW - Math.max(sz / 2, _nameHalfWidth(e, sz, remPx))));
+    }
     const top = -region.up + sz / 2, bot = region.down - sz / 2 - nameH;
     const self = pos.get(selfEl) || { x: 0, y: 0 };
     for (let it = 0; it < 160; it++) {
@@ -415,7 +448,11 @@ function _relaxBoxes(pos, selfEl, sz, selfSz, nameH, region) {
                 else { const s = (A.y >= B.y ? 1 : -1) * qy / 2; A.y += s; B.y -= s; }
             }
         }
-        for (const e of others) { const p = pos.get(e); p.x = Math.max(-hx, Math.min(hx, p.x)); p.y = Math.max(top, Math.min(bot, p.y)); }
+        for (const e of others) {
+            const p = pos.get(e), hx = hxOf.get(e);
+            p.x = Math.max(-hx, Math.min(hx, p.x));
+            p.y = Math.max(top, Math.min(bot, p.y));
+        }
     }
     for (let f = 0; f < 50; f++) {
         let moved = false;
@@ -428,7 +465,10 @@ function _relaxBoxes(pos, selfEl, sz, selfSz, nameH, region) {
             const qx = wReq - Math.abs(A.x - B.x), qy = hReq - Math.abs(A.y - B.y);
             if (qx > 0 && qy > 0) { const s = (A.x >= B.x ? 1 : -1) * (qx / 2 + 0.5); A.x += s; B.x -= s; moved = true; }
         }
-        for (const e of others) { const p = pos.get(e); p.x = Math.max(-hx, Math.min(hx, p.x)); }
+        for (const e of others) {
+            const p = pos.get(e), hx = hxOf.get(e);
+            p.x = Math.max(-hx, Math.min(hx, p.x));
+        }
         if (!moved) break;
     }
 }
@@ -493,7 +533,10 @@ function layoutParticipants() {
 
     /* Разводим остаточные наложения ников (тесная область на 7-10) — в просторной
        это no-op, дуга остаётся чистой. В режиме строк не трогаем (шаг уже без наложений). */
-    if (n >= 3 && !rowsMode) _relaxBoxes(pos, selfEl, sz, selfSz, nameH, region);
+    if (n >= 3 && !rowsMode) {
+        _relaxBoxes(pos, selfEl, sz, selfSz, nameH, region, remPx);
+        _centerVertically(pos, selfEl, sz, selfSz, nameH, selfNameH, region);
+    }
 
     const szPx = sz.toFixed(1) + "px", selfSzPx = selfSz.toFixed(1) + "px";
     for (const el of els) {
