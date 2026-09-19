@@ -330,7 +330,13 @@ jobs:
       # релизы идут сюда же. Анонимный доступ к release-URL работает (нужен
       # апдейтеру и кнопкам лендинга без авторизации). Бинарники к тому же
       # дублируются на свой домен (/dl) — см. шаг «Upload artifacts to VPS».
-      RELEASES_REPO: jettsba/void
+      #
+      # ${{ github.repository }}, а не хардкод jettsba/void — раньше сборка с
+      # форка пыталась бы создать релиз В ЧУЖОМ репо (встроенный GITHUB_TOKEN
+      # форка туда прав не имеет, упало бы на "Create GitHub Release"). На
+      # самом jettsba/void github.repository == jettsba/void — поведение не
+      # меняется, просто больше не завязано на конкретное имя репо.
+      RELEASES_REPO: ${{ github.repository }}
 
     steps:
       - uses: actions/checkout@v4
@@ -562,7 +568,11 @@ jobs:
       # на /dl (а не на GitHub). Переиспользуем те же deploy-секреты, что и web —
       # ничего нового, и переезд на новый сервер = смена DEPLOY_HOST + DNS.
       - name: Upload artifacts to VPS mirror
-        if: steps.check.outputs.exists == 'false'
+        # + github.ref == main: этот шаг SSH'ится на прод-VPS (void-room.space)
+        # теми же DEPLOY_* секретами, что и job `deploy` — на форке их нет (и
+        # быть не должно, это не их сервер), шаг падал бы. А на самом апстриме
+        # мы не хотим зеркалить на прод сборки с фиче-веток.
+        if: steps.check.outputs.exists == 'false' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
