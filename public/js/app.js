@@ -184,12 +184,23 @@ function init() {
     soundBtn.addEventListener("click", toggleSound);
     screencastBtn.addEventListener("click", handleScreencastBtnClick);
 
+    /* Тайл "своё" (custom) в каждой группе (#scRes/#scFps) держит рядом
+       .sc-custom-row со своими полями ввода — показываем её только когда
+       именно этот тайл активен, прячем при выборе любого пресета. */
+    const SC_CUSTOM_ROW_BY_GROUP = { scRes: "scResCustomRow", scFps: "scFpsCustomRow", scBitrate: "scBitrateCustomRow" };
     scModal.querySelectorAll(".sc-tiles").forEach(group => {
         group.addEventListener("click", e => {
             const tile = e.target.closest(".sc-tile");
             if (!tile) return;
             group.querySelectorAll(".sc-tile").forEach(t => t.classList.remove("sc-tile--active"));
             tile.classList.add("sc-tile--active");
+            const rowId = SC_CUSTOM_ROW_BY_GROUP[group.id];
+            const row = rowId && document.getElementById(rowId);
+            if (row) {
+                const isCustom = tile.dataset.val === "custom";
+                row.hidden = !isCustom;
+                if (isCustom) row.querySelector(".sc-custom-input")?.focus({ preventScroll: true });
+            }
         });
     });
 
@@ -200,18 +211,57 @@ function init() {
        лёгок), и тогда пикер открывался бы дважды, а звук старта звучал бы
        два раза. */
     let _scStarting = false;
+    /* Зажимаем введённое число в разумные границы (те же min/max, что и на
+       самих <input>, — атрибуты не мешают вставить руками произвольное
+       значение или пустую строку). NaN/пусто → fallback. */
+    const clampNum = (raw, min, max, fallback) => {
+        const n = parseInt(raw, 10);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.max(min, Math.min(max, n));
+    };
+    /* Битрейт вводится в Мбит/с дробным числом (шаг 0.5) — clampNum обрезал бы
+       parseInt'ом до целых. */
+    const clampFloat = (raw, min, max, fallback) => {
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.max(min, Math.min(max, n));
+    };
     scNextBtn.addEventListener("click", async () => {
         if (_scStarting || isScreencasting) return;
         _scStarting = true;
-        const res = parseInt(scModal.querySelector("#scRes .sc-tile--active")?.dataset.val ?? "1080");
-        const fps = parseInt(scModal.querySelector("#scFps .sc-tile--active")?.dataset.val ?? "30");
+        const resTile = scModal.querySelector("#scRes .sc-tile--active");
+        const fpsTile = scModal.querySelector("#scFps .sc-tile--active");
+        let res = parseInt(resTile?.dataset.val ?? "1080");
+        let fps = parseInt(fpsTile?.dataset.val ?? "30");
+        /* Кастомное разрешение — ширина и высота задаются отдельно (не
+           привязаны к 16:9, как пресеты), поэтому передаём width явным
+           отдельным аргументом в startScreenShare. */
+        let customWidth = null;
+        if (resTile?.dataset.val === "custom") {
+            customWidth = clampNum(document.getElementById("scResCustomW")?.value, 320, 7680, 2560);
+            res = clampNum(document.getElementById("scResCustomH")?.value, 240, 4320, 1440);
+        }
+        if (fpsTile?.dataset.val === "custom") {
+            fps = clampNum(document.getElementById("scFpsCustomVal")?.value, 1, 240, 120);
+        }
+        /* Битрейт: "auto" (дефолтный тайл) → null, передаём в startScreenShare
+           как есть — потолок считается из res/fps, как раньше. Пресеты/custom —
+           число в Мбит/с, конвертируем в бит/с (что ждёт screenTargetBitrate). */
+        const bitrateTile = scModal.querySelector("#scBitrate .sc-tile--active");
+        let customBitrate = null;
+        if (bitrateTile && bitrateTile.dataset.val !== "auto") {
+            const mbps = bitrateTile.dataset.val === "custom"
+                ? clampFloat(document.getElementById("scBitrateCustomVal")?.value, 0.5, 50, 15)
+                : parseFloat(bitrateTile.dataset.val);
+            customBitrate = Math.round(mbps * 1_000_000);
+        }
         /* Тумблер «звук демки» (дефолт вкл). На desktop звук берёт нативный
            loopback, на web — getDisplayMedia. Выключен → демка без звука, без
            трансляции системных звуков стримера. */
         const captureAudio = document.getElementById("scAudio")?.checked ?? true;
         closeScModal();
         try {
-            await startScreenShare(res, fps, captureAudio);
+            await startScreenShare(res, fps, captureAudio, customWidth, customBitrate);
             isScreencasting = true;
             broadcastScreencastState(true);
             updateScreencastButton(true);
@@ -229,6 +279,9 @@ function init() {
 
     document.getElementById("screenOverlayFullscreen").addEventListener("click", toggleScreenFullscreen);
 
+    /* Технические детали демки — доступно всем зрителям (см. screen-overlay.js). */
+    document.getElementById("screenOverlayStatsBtn")?.addEventListener("click", toggleScreenStats);
+
     /* Кнопка громкости демки: клик по иконке — mute; слайдер (drag) и колёсико —
        уровень. Слайдер кастомный (см. initDemoVolumeSlider в screen-overlay.js). */
     document.getElementById("screenOverlayVolBtn")?.addEventListener("click", toggleDemoMute);
@@ -239,7 +292,7 @@ function init() {
     screenOverlay.addEventListener("mousemove", showScreenControls);
     screenOverlay.addEventListener("pointerdown", showScreenControls);
     screenOverlay.addEventListener("focusin", showScreenControls);
-    ["screenOverlayVolume", "screenOverlayFullscreen", "screenOverlayClose"].forEach(id => {
+    ["screenOverlayVolume", "screenOverlayFullscreen", "screenOverlayClose", "screenOverlayStatsBtn", "screenOverlayStatsPanel"].forEach(id => {
         const el = document.getElementById(id);
         el?.addEventListener("mouseenter", () => setPointerOnScreenControls(true));
         el?.addEventListener("mouseleave", () => setPointerOnScreenControls(false));

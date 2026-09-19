@@ -28,6 +28,13 @@ let screenAudioChannel = null;
    например — re-join во время трансляции). Reset в stopScreenShare. */
 let screenTargetHeight = 1080;
 let screenTargetFps = 30;
+/* Кастомный потолок битрейта демки (бит/с) — задаётся тайлом "своё" в секции
+   битрейта (index.html/app.js). null = авто (потолок считается из
+   height/fps, как раньше — см. applyDirectScreenVideoParams/
+   patchVideoStartBitrate). Не подменяет собой SCREEN_UPLOAD_BUDGET/
+   relay-safety-cap ниже — те остаются жёсткими верхними границами независимо
+   от того, что попросил пользователь. Reset в stopScreenShare. */
+let screenTargetBitrate = null;
 /* Суммарный бюджет аплоада демки (бит/с), делится между зрителями (mesh: один
    video-track уходит N отдельными потоками, аплоад шарера иначе = N × потолок).
    28M подобран как СТРОГО без регресса для нынешних размеров комнаты: при ≤4
@@ -613,7 +620,7 @@ function teardownAudioGraph() {
  * в Safari отсутствует, тогда всё идёт в системный default.
  *
  * Output volume — мастер-множитель (settings.audioOutGain ∈ [0..1]) поверх
- * per-peer (volumeMap[userId] ∈ [0..1]). Финал = clamp(per × master).
+ * per-peer (volumeMap[userId] ∈ [0..1]). Финал = clamp(per × master, 0, 1).
  *
  * Input gain — `audioGraph.gain.gain.value` (ровно последняя нода в цепи).
  * Меняется на лету, без renegotiation; peer.addTrack привязан к выходу
@@ -629,11 +636,12 @@ function getMasterOutputGain() {
 }
 
 function applyOutputVolumeForUser(userId) {
-    const audio = audioMap.get(userId);
-    if (!audio) return;
     const per = volumeMap.get(userId) ?? 1;
     const master = getMasterOutputGain();
-    audio.volume = Math.max(0, Math.min(1, per * master));
+    const value = Math.max(0, Math.min(1, per * master));
+
+    const audio = audioMap.get(userId);
+    if (audio) audio.volume = value;
 }
 
 function applyOutputVolumeAll() {
@@ -2090,8 +2098,24 @@ function reportDisplayMediaFailure(err, askedAt) {
     } catch (_) {}
 }
 
-async function startScreenShare(height = 1080, fps = 30, captureAudio = false) {
-    const width = height === 480 ? 854 : height === 720 ? 1280 : 1920;
+async function startScreenShare(height = 1080, fps = 30, captureAudio = false, customWidth = null, customBitrate = null) {
+    /* customWidth — явная ширина для кастомного разрешения (см. sc-tile--custom
+       в index.html/app.js): там высота и ширина не привязаны к 16:9, как в
+       трёх пресетах ниже, а задаются раздельно. Для пресетов и для любой
+       другой высоты без явного customWidth считаем по 16:9 (общий случай —
+       на будущее, если добавится ещё пресет вроде 1440p).
+
+       customBitrate — потолок битрейта демки в БИТАХ/сек из тайла «своё» секции
+       битрейта (index.html/app.js). null/0 = авто (потолок считается из height/
+       fps, как раньше). Кладётся в screenTargetBitrate — используется ниже в
+       patchVideoStartBitrate/applyDirectScreenVideoParams/applyRelayBitrateLimits;
+       relay-safety-cap и SCREEN_UPLOAD_BUDGET остаются жёсткими верхними
+       границами независимо от того, что попросил пользователь. */
+    const width = customWidth > 0 ? customWidth
+        : height === 480 ? 854
+        : height === 720 ? 1280
+        : height === 1080 ? 1920
+        : Math.round(height * 16 / 9);
     /* На desktop звук демки берём НЕ из getDisplayMedia (он тащит голоса void),
        а нативным WASAPI loopback с исключением нашего процесс-дерева (чисто, без
        ducking). На web/нет-Tauri — старый путь через getDisplayMedia system audio. */
@@ -2243,6 +2267,7 @@ async function startScreenShare(height = 1080, fps = 30, captureAudio = false) {
        (если кто-то ре-джойнится посреди трансляции). */
     screenTargetHeight = height;
     screenTargetFps = fps;
+    screenTargetBitrate = customBitrate > 0 ? customBitrate : null;
     for (const [userId, peer] of peers) {
         const senders = [];
         if (videoTrack) senders.push(peer.addTrack(videoTrack, screenStream));
@@ -2317,7 +2342,12 @@ function patchVideoStartBitrate(sdp, height, fps) {
        каша (потери), при qLim=none на отправителе. Дефолт Chrome — 30kbps, и
        поднимать его «очень опасно вне полностью контролируемой среды» (rtcbits).
        Floor отдаём congestion control'у — он сам найдёт реальную полосу. */
-    const target = height >= 1080 ? (fps >= 60 ? 11200 : 7000)
+    /* screenTargetBitrate (бит/с, из тайла «своё» секции битрейта) переопределяет
+       расчёт по тиерам, если задан — юзер явно попросил конкретный потолок.
+       Реальный hard cap всё равно применяется на энкодере ниже (applyDirect
+       ScreenVideoParams/applyRelayBitrateLimits), это лишь хинт для cold-start BWE. */
+    const target = screenTargetBitrate ? Math.round(screenTargetBitrate / 1000)
+                  : height >= 1080 ? (fps >= 60 ? 11200 : 7000)
                   : height >= 720  ? (fps >= 60 ? 5600  : 3500)
                   :                   (fps >= 60 ? 2400  : 1500);
     const start = Math.min(2500, target);
@@ -2570,7 +2600,11 @@ async function applyDirectScreenVideoParams(senders, height, fps) {
     const base = height >= 1080 ? 7_000_000
                 : height >= 720  ? 3_500_000
                 : 1_500_000;
-    const ceiling = fps >= 60 ? Math.round(base * 1.6) : base;
+    /* screenTargetBitrate — явный потолок из тайла «своё» (см. startScreenShare).
+       Переопределяет расчёт по height/fps целиком, если задан. Ниже он всё равно
+       проходит через Math.min с бюджетом на зрителя — «своё» не может обойти
+       SCREEN_UPLOAD_BUDGET, только попросить конкретное число в его рамках. */
+    const ceiling = screenTargetBitrate || (fps >= 60 ? Math.round(base * 1.6) : base);
     /* Делим бюджет аплоада на число зрителей: при 1-4 потолок качества не
        достигает лимита (min берёт ceiling → полное 1080p), при многих зрителях
        — режем, чтобы суммарный аплоад шарера держался около SCREEN_UPLOAD_BUDGET. */
@@ -2634,6 +2668,7 @@ function stopScreenShare() {
     stopNativeScreenAudio();
     screenTargetHeight = 1080;
     screenTargetFps = 30;
+    screenTargetBitrate = null;
     emitScreencastActive(false);
 }
 
@@ -2748,6 +2783,61 @@ async function collectDiagReport() {
         }
     }
     return report;
+}
+
+/* ===== Технические детали демки (кнопка на screen-overlay, см. screen-overlay.js) =====
+   В отличие от peer-HUD выше (dev-only, per-peer, обе стороны сразу), это —
+   пользовательская фича: доступна ВСЕМ участникам, показывает статистику
+   ТОЛЬКО того видео-потока, который сейчас смотрят на overlay (screenOverlayUserId).
+   Со стороны зрителя нужный peer шлёт нам видео — читаем inbound-rtp (не
+   outbound, это была бы статистика отправки, а не приёма). */
+const _screenStatsPrev = new Map(); // userId → { bytes, ts }
+
+async function getScreenStatsForViewer(userId) {
+    const peer = peers?.get(userId);
+    if (!peer) return null;
+    let stats;
+    try { stats = await peer.getStats(); } catch (_) { return null; }
+    let vin = null, pair = null, rout = null;
+    stats.forEach(r => {
+        if (r.type === "inbound-rtp" && r.kind === "video") vin = r;
+        else if (r.type === "remote-outbound-rtp" && r.kind === "video") rout = r;
+        else if (r.type === "candidate-pair" && r.nominated && r.state === "succeeded") pair = r;
+    });
+    if (!vin) return null; // этот пир нам видео не шлёт (ещё не приехало / не он шарит)
+
+    const codecStat = vin.codecId ? stats.get(vin.codecId) : null;
+    const codec = codecStat?.mimeType ? codecStat.mimeType.split("/")[1] || codecStat.mimeType : null;
+
+    const lc = pair && stats.get(pair.localCandidateId);
+    const rc = pair && stats.get(pair.remoteCandidateId);
+    const connection = (lc?.candidateType === "relay" || rc?.candidateType === "relay") ? "relay" : "direct";
+    const rtt = pair?.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000)
+              : (rout?.roundTripTime != null ? Math.round(rout.roundTripTime * 1000) : null);
+
+    const now = performance.now();
+    const prev = _screenStatsPrev.get(userId) || { bytes: 0, ts: 0 };
+    const dt = prev.ts ? (now - prev.ts) / 1000 : 0;
+    const kbps = (dt > 0 && vin.bytesReceived != null) ? Math.round(((vin.bytesReceived - prev.bytes) * 8) / 1000 / dt) : null;
+    _screenStatsPrev.set(userId, { bytes: vin.bytesReceived || 0, ts: now });
+
+    return {
+        width: vin.frameWidth || null,
+        height: vin.frameHeight || null,
+        fps: vin.framesPerSecond != null ? Math.round(vin.framesPerSecond) : null,
+        kbps,
+        codec,
+        connection,
+        rtt
+    };
+}
+
+/* Сбросить delta-кэш при закрытии overlay/смене пира — иначе первое чтение
+   после паузы посчитает kbps по устаревшему bytes/ts (заниженный/мусорный
+   всплеск в первую секунду). */
+function clearScreenStatsCache(userId) {
+    if (userId) _screenStatsPrev.delete(userId);
+    else _screenStatsPrev.clear();
 }
 
 /* Force-relay: пересобираем активные peer'ы, чтобы новый iceTransportPolicy
@@ -3102,7 +3192,12 @@ async function applyRelayBitrateLimits(peer) {
        большом числе зрителей делённый бюджет опускает его ещё ниже (напр. 9
        зрителей → ~1.7 Mbps), удерживая суммарную relay-нагрузку coturn. */
     const viewers = screenViewerCount();
-    const videoCap = Math.min(3_000_000, Math.round(SCREEN_UPLOAD_BUDGET / viewers));
+    /* screenTargetBitrate может только ПОНИЗИТЬ relay-safety-cap (3.0 Mbps),
+       никогда не поднять его выше — это защита 1-vCPU coturn, а не то, чем
+       управляет тайл «своё». Если юзер попросил 10 Мбит, а он на relay —
+       всё равно 3.0 Мбит потолок (или ниже, если бюджет на зрителя меньше). */
+    const relayCeiling = screenTargetBitrate ? Math.min(screenTargetBitrate, 3_000_000) : 3_000_000;
+    const videoCap = Math.min(relayCeiling, Math.round(SCREEN_UPLOAD_BUDGET / viewers));
     for (const sender of senders) {
         if (!sender.track) continue;
         if (sender.track.kind !== "video") continue;

@@ -41,7 +41,7 @@
     <link rel="stylesheet" href="css/chat.css?v=26">
     <link rel="stylesheet" href="css/chat-attach.css?v=21">
     <link rel="stylesheet" href="css/chat-overlay.css?v=20">
-    <link rel="stylesheet" href="css/screencast.css?v=34">
+    <link rel="stylesheet" href="css/screencast.css?v=35">
     <link rel="stylesheet" href="css/responsive.css?v=23">
     <link rel="stylesheet" href="css/settings.css?v=39">
     <link rel="stylesheet" href="css/app-settings.css?v=11">
@@ -374,6 +374,21 @@
                         <span class="sc-tile-num">1080</span>
                         <span class="sc-tile-sub">p</span>
                     </button>
+                    <button class="sc-tile sc-tile--custom" data-val="custom">
+                        <span class="sc-tile-num sc-tile-num--word" data-i18n="screencast.custom">custom</span>
+                    </button>
+                </div>
+                <!-- Показывается только когда выбран тайл "своё" выше (см. js/app.js). -->
+                <div class="sc-custom-row" id="scResCustomRow" hidden>
+                    <input type="number" class="sc-custom-input" id="scResCustomW"
+                        inputmode="numeric" min="320" max="7680" step="1" value="2560"
+                        placeholder="width" data-i18n-placeholder="screencast.custom.width"
+                        aria-label="width" data-i18n-attr="aria-label:screencast.custom.width"/>
+                    <span class="sc-custom-x" aria-hidden="true">×</span>
+                    <input type="number" class="sc-custom-input" id="scResCustomH"
+                        inputmode="numeric" min="240" max="4320" step="1" value="1440"
+                        placeholder="height" data-i18n-placeholder="screencast.custom.height"
+                        aria-label="height" data-i18n-attr="aria-label:screencast.custom.height"/>
                 </div>
             </div>
 
@@ -388,6 +403,45 @@
                         <span class="sc-tile-num">60</span>
                         <span class="sc-tile-sub">fps</span>
                     </button>
+                    <button class="sc-tile sc-tile--custom" data-val="custom">
+                        <span class="sc-tile-num sc-tile-num--word" data-i18n="screencast.custom">custom</span>
+                    </button>
+                </div>
+                <div class="sc-custom-row" id="scFpsCustomRow" hidden>
+                    <input type="number" class="sc-custom-input" id="scFpsCustomVal"
+                        inputmode="numeric" min="1" max="240" step="1" value="120"
+                        placeholder="fps" data-i18n-placeholder="screencast.custom.fpsValue"
+                        aria-label="fps" data-i18n-attr="aria-label:screencast.custom.fpsValue"/>
+                </div>
+            </div>
+
+            <div class="sc-section">
+                <span class="sc-section-label" data-i18n="screencast.bitrate">bitrate</span>
+                <div class="sc-tiles" id="scBitrate">
+                    <button class="sc-tile sc-tile--active" data-val="auto">
+                        <span class="sc-tile-num sc-tile-num--word" data-i18n="screencast.bitrate.auto">auto</span>
+                    </button>
+                    <button class="sc-tile" data-val="3">
+                        <span class="sc-tile-num">3</span>
+                        <span class="sc-tile-sub">mbps</span>
+                    </button>
+                    <button class="sc-tile" data-val="6">
+                        <span class="sc-tile-num">6</span>
+                        <span class="sc-tile-sub">mbps</span>
+                    </button>
+                    <button class="sc-tile" data-val="10">
+                        <span class="sc-tile-num">10</span>
+                        <span class="sc-tile-sub">mbps</span>
+                    </button>
+                    <button class="sc-tile sc-tile--custom" data-val="custom">
+                        <span class="sc-tile-num sc-tile-num--word" data-i18n="screencast.custom">custom</span>
+                    </button>
+                </div>
+                <div class="sc-custom-row" id="scBitrateCustomRow" hidden>
+                    <input type="number" class="sc-custom-input" id="scBitrateCustomVal"
+                        inputmode="decimal" min="0.5" max="50" step="0.5" value="15"
+                        placeholder="mbps" data-i18n-placeholder="screencast.custom.bitrateValue"
+                        aria-label="mbps" data-i18n-attr="aria-label:screencast.custom.bitrateValue"/>
                 </div>
             </div>
 
@@ -417,6 +471,38 @@
             </svg>
         </button>
         <video class="screen-overlay-video" id="screenOverlayVideo" autoplay playsinline></video>
+        <!-- Технические детали демки — доступно всем (не dev-only, см. webrtc.js
+             getScreenStatsForViewer). Кнопка входит в общую auto-hide группу
+             control'ов, панель — нет, держится открытой пока юзер её не закроет. -->
+        <button class="screen-overlay-stats-btn" id="screenOverlayStatsBtn" type="button" aria-label="technical details"
+            data-i18n-attr="aria-label:screencast.stats.button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16v-4M12 8h.01" />
+                <circle cx="12" cy="12" r="9" />
+            </svg>
+        </button>
+        <div class="screen-overlay-stats-panel" id="screenOverlayStatsPanel" hidden>
+            <div class="stats-row">
+                <span data-i18n="screencast.stats.resolution">resolution</span>
+                <b id="statResolution">—</b>
+            </div>
+            <div class="stats-row">
+                <span data-i18n="screencast.stats.bitrate">bitrate</span>
+                <b id="statBitrate">—</b>
+            </div>
+            <div class="stats-row">
+                <span data-i18n="screencast.stats.codec">codec</span>
+                <b id="statCodec">—</b>
+            </div>
+            <div class="stats-row">
+                <span data-i18n="screencast.stats.connection">connection</span>
+                <b id="statConnection">—</b>
+            </div>
+            <div class="stats-row">
+                <span data-i18n="screencast.stats.rtt">ping</span>
+                <b id="statRtt">—</b>
+            </div>
+        </div>
         <div class="screen-overlay-volume" id="screenOverlayVolume">
             <div class="screen-overlay-volslider" id="screenOverlayVolSlider" role="slider" aria-label="volume"
                 data-i18n-attr="aria-label:screencast.volume" aria-valuemin="0" aria-valuemax="100"
@@ -470,10 +556,10 @@
     <script defer src="js/participants.js?v=8"></script>
     <script defer src="js/volume-arc.js?v=3"></script>
     <script defer src="js/ping-panel.js?v=2"></script>
-    <script defer src="js/screen-overlay.js?v=9"></script>
+    <script defer src="js/screen-overlay.js?v=10"></script>
     <script defer src="js/intro.js?v=3"></script>
     <script defer src="js/room.js?v=9"></script>
-    <script defer src="js/app.js?v=25"></script>
+    <script defer src="js/app.js?v=26"></script>
     <script defer src="js/desktop/titlebar.js?v=1"></script>
     <script defer src="js/desktop/tray-state.js?v=3"></script>
     <script defer src="js/desktop/clipboard.js?v=1"></script>

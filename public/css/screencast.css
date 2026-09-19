@@ -270,6 +270,70 @@
     color: var(--fg-3);
 }
 
+/* Тайл "своё" — вместо крупной цифры короткое слово, набор чуть мельче
+   sc-tile-num, чтобы не выглядело так, будто там забыли подставить число. */
+.sc-tile-num--word {
+    font-size: 0.86rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+    color: var(--fg-3);
+    transition: color 0.14s ease;
+}
+
+.sc-tile--active .sc-tile-num--word {
+    color: var(--fg);
+}
+
+/* Поля ширины/высоты (или fps) для кастомного тайла — показываются только
+   когда соответствующий .sc-tile--custom активен (см. js/app.js). */
+.sc-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 0.57rem;
+    margin-top: -0.14rem;
+}
+
+.sc-custom-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-2);
+    border: 1px solid var(--fg-4);
+    border-radius: 0.57rem;
+    padding: 0.57rem 0.71rem;
+    font: inherit;
+    font-size: 0.93rem;
+    color: var(--fg);
+    text-align: center;
+    transition: border-color 0.14s ease;
+}
+
+.sc-custom-input:hover {
+    border-color: var(--fg-3);
+}
+
+.sc-custom-input:focus {
+    outline: none;
+    border-color: var(--fg-2);
+}
+
+/* Нативные стрелки number-инпута не в стиле приложения — убираем. */
+.sc-custom-input::-webkit-outer-spin-button,
+.sc-custom-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.sc-custom-input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+.sc-custom-x {
+    color: var(--fg-4);
+    font-size: 0.86rem;
+    flex-shrink: 0;
+}
+
 .sc-section--row {
     flex-direction: row;
     align-items: center;
@@ -428,7 +492,8 @@ html.desktop.screen-native-fs .void-titlebar {
    base.css — тем же, что у лайтбокса. Дублировать здесь фон/рамку/размер нельзя,
    иначе локальные значения тихо перебьют общие, и кнопки снова разъедутся. */
 .screen-overlay-fullscreen,
-.screen-overlay-volume {
+.screen-overlay-volume,
+.screen-overlay-stats-btn {
     position: absolute;
     right: 1.43rem;
     z-index: 2;
@@ -457,10 +522,80 @@ html.desktop.screen-native-fs .void-titlebar {
 }
 
 .screen-overlay-fullscreen:hover,
-.screen-overlay-volume:hover {
+.screen-overlay-volume:hover,
+.screen-overlay-stats-btn:hover {
     color: var(--fg);
     border-color: var(--fg-2);
     background: rgba(16, 16, 18, 0.88);
+}
+
+/* Кнопка технических деталей — зеркало fullscreen, но на ЛЕВОМ краю (правый
+   занят fullscreen/volume). Своя колонка controls, не смешивается с ними. */
+.screen-overlay-stats-btn {
+    left: 1.43rem;
+    right: auto;
+    bottom: 1.43rem;
+    width: var(--sc-btn);
+    height: var(--sc-btn);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.screen-overlay-stats-btn svg {
+    width: 1rem;
+    height: 1rem;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+}
+
+.screen-overlay-stats-btn.is-active {
+    color: var(--fg);
+    border-color: var(--fg-2);
+    background: rgba(16, 16, 18, 0.88);
+}
+
+/* Панель технических деталей — карточка НАД кнопкой, тем же left. В отличие
+   от кнопки, НЕ входит в auto-hide группу ниже: открыл — видна, пока сам не
+   закроешь (кликом по кнопке), простой мыши её не гасит. Видимость целиком
+   на JS через [hidden] (см. toggleScreenStats в screen-overlay.js). */
+.screen-overlay-stats-panel {
+    position: absolute;
+    left: 1.43rem;
+    bottom: calc(1.43rem + var(--sc-btn) + 0.5rem);
+    z-index: 2;
+    min-width: 13rem;
+    background: rgba(16, 16, 18, 0.85);
+    border: 1px solid var(--fg-4);
+    border-radius: 2px;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    padding: 0.72rem 0.86rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.36rem;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.screen-overlay-stats-panel .stats-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    color: var(--fg-3);
+}
+
+.screen-overlay-stats-panel .stats-row b {
+    color: var(--fg);
+    font-weight: 500;
+    white-space: nowrap;
 }
 
 .screen-overlay-close {
@@ -608,17 +743,23 @@ html.desktop.screen-native-fs .void-titlebar {
     opacity: 0.35;
 }
 
-/* ===== Авто-скрытие контролов при бездействии (YouTube-style) ===== */
+/* ===== Авто-скрытие контролов при бездействии (YouTube-style) =====
+   Кнопка статистики входит сюда наравне с остальными control-кнопками —
+   гаснет при простое. Сама ПАНЕЛЬ (.screen-overlay-stats-panel) сюда
+   намеренно не входит: открыта она независимо от simple/controls-active,
+   закрывается только явным кликом (см. toggleScreenStats). */
 .screen-overlay-close,
 .screen-overlay-fullscreen,
-.screen-overlay-volume {
+.screen-overlay-volume,
+.screen-overlay-stats-btn {
     opacity: 0;
     pointer-events: none;
 }
 
 .screen-overlay.controls-active .screen-overlay-close,
 .screen-overlay.controls-active .screen-overlay-fullscreen,
-.screen-overlay.controls-active .screen-overlay-volume {
+.screen-overlay.controls-active .screen-overlay-volume,
+.screen-overlay.controls-active .screen-overlay-stats-btn {
     opacity: 1;
     pointer-events: auto;
 }

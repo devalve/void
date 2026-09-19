@@ -22,8 +22,8 @@
      * audioInId / audioOutId — deviceId выбранных устройств; пустая строка =
      * «системное по умолчанию» (passes constraints без явного deviceId).
      * audioInGain — множитель для GainNode в audio-графе (0..1.5, 1.0 = unity).
-     * audioOutGain — мастер-громкость для всех `<audio>` элементов peers
-     *               и системных звуков (0..1.0).
+     * audioOutGain — мастер-громкость для всех peers (через audio.volume в
+     *               webrtc.js) и системных звуков (0..1.0).
      */
     const DEFAULTS = {
         lang: "ru",
@@ -195,10 +195,25 @@
             "screencast.title": "демонстрация экрана",
             "screencast.resolution": "разрешение",
             "screencast.fps": "частота кадров",
+            "screencast.custom": "своё",
+            "screencast.custom.width": "ширина",
+            "screencast.custom.height": "высота",
+            "screencast.custom.fpsValue": "кадры/сек",
+            "screencast.bitrate": "битрейт",
+            "screencast.bitrate.auto": "авто",
+            "screencast.custom.bitrateValue": "мбит/с",
             "screencast.audio": "звук экрана",
             "screencast.next": "далее →",
             "screencast.fullscreen": "на весь экран",
             "screencast.volume": "громкость",
+            "screencast.stats.button": "технические детали",
+            "screencast.stats.resolution": "разрешение",
+            "screencast.stats.bitrate": "битрейт",
+            "screencast.stats.codec": "кодек",
+            "screencast.stats.connection": "соединение",
+            "screencast.stats.connection.direct": "напрямую",
+            "screencast.stats.connection.relay": "через сервер",
+            "screencast.stats.rtt": "пинг",
 
             "settings.title": "настройки",
             "settings.cat.profile": "профиль",
@@ -420,10 +435,25 @@
             "screencast.title": "screen share",
             "screencast.resolution": "resolution",
             "screencast.fps": "frame rate",
+            "screencast.custom": "custom",
+            "screencast.custom.width": "width",
+            "screencast.custom.height": "height",
+            "screencast.custom.fpsValue": "fps",
+            "screencast.bitrate": "bitrate",
+            "screencast.bitrate.auto": "auto",
+            "screencast.custom.bitrateValue": "mbps",
             "screencast.audio": "screen audio",
             "screencast.next": "next →",
             "screencast.fullscreen": "fullscreen",
             "screencast.volume": "volume",
+            "screencast.stats.button": "technical details",
+            "screencast.stats.resolution": "resolution",
+            "screencast.stats.bitrate": "bitrate",
+            "screencast.stats.codec": "codec",
+            "screencast.stats.connection": "connection",
+            "screencast.stats.connection.direct": "direct",
+            "screencast.stats.connection.relay": "relayed",
+            "screencast.stats.rtt": "ping",
 
             "settings.title": "settings",
             "settings.cat.profile": "profile",
